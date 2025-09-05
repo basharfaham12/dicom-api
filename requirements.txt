@@ -1,10 +1,5 @@
 fastapi
 uvicorn
-python-multipart
-dicom2nifti
-nibabel
-pyrobex
+opencv-python
 Pillow
 numpy
-opencv-python
-tqdm

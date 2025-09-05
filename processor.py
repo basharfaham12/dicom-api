@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 import random
 from PIL import Image, ImageEnhance
-import os
 
 def center_crop_brain(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -10,7 +9,8 @@ def center_crop_brain(img):
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
         x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
-        return img[y:y+h, x:x+w]
+        cropped = img[y:y+h, x:x+w]
+        return cropped
     return img
 
 def apply_clahe_and_soft_sharpen(img):
@@ -20,6 +20,7 @@ def apply_clahe_and_soft_sharpen(img):
     cl = clahe.apply(l)
     merged = cv2.merge((cl, a, b))
     enhanced = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
+
     blurred = cv2.GaussianBlur(enhanced, (3, 3), sigmaX=1.0)
     sharpened = cv2.addWeighted(enhanced, 1.2, blurred, -0.2, 0)
     return sharpened
@@ -46,16 +47,3 @@ def augment_image(img):
     img = img.resize((224, 224))
     ops.append(img)
     return random.choice(ops)
-
-def enhance_single_image(path, case_id):
-    img = cv2.imread(path)
-    centered = center_crop_brain(img)
-    enhanced = apply_clahe_and_soft_sharpen(centered)
-    resized = cv2.resize(enhanced, (224, 224))
-    pil_img = Image.fromarray(cv2.cvtColor(resized, cv2.COLOR_BGR2RGB))
-    final_img = augment_image(pil_img)
-
-    output_path = f"outputs/{case_id}_enhanced.png"
-    os.makedirs("outputs", exist_ok=True)
-    final_img.save(output_path)
-    return output_path
