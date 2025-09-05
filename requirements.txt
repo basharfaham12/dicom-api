@@ -6,5 +6,4 @@ nibabel
 pyrobex
 Pillow
 numpy
-tqdm
 opencv-python

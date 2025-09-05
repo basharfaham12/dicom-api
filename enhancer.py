@@ -1,7 +1,6 @@
-# enhancer.py
 import os
 import cv2
-from PIL import Image, ImageEnhance
+from PIL import Image
 
 def enhance_images(image_paths, output_dir):
     os.makedirs(output_dir, exist_ok=True)
@@ -12,8 +11,7 @@ def enhance_images(image_paths, output_dir):
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if contours:
             x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
-            cropped = img[y:y+h, x:x+w]
-            return cropped
+            return img[y:y+h, x:x+w]
         return img
 
     def apply_clahe_and_soft_sharpen(img):

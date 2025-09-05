@@ -1,3 +1,10 @@
+from fastapi import FastAPI, UploadFile, File
+import os, shutil, uuid
+from processor import process_single_dicom_file
+from enhancer import enhance_images
+
+app = FastAPI()
+
 @app.post("/process_single/")
 async def process_single_dicom(file: UploadFile = File(...)):
     case_id = str(uuid.uuid4())

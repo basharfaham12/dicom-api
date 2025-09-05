@@ -1,8 +1,14 @@
+import os
+import dicom2nifti
+import nibabel as nib
+from pyrobex.robex import robex
+from PIL import Image
+import numpy as np
+
 def process_single_dicom_file(dicom_file_path, output_dir):
     temp_dir = os.path.join(output_dir, "nifti_temp")
     os.makedirs(temp_dir, exist_ok=True)
 
-    # تحويل ملف DICOM إلى NIfTI
     dicom2nifti.convert_directory(os.path.dirname(dicom_file_path), temp_dir, compression=True)
     nifti_file = [f for f in os.listdir(temp_dir) if f.endswith('.nii.gz')][0]
     nifti_path = os.path.join(temp_dir, nifti_file)
