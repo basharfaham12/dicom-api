@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+dicom2nifti
+nibabel
+pyrobex
+Pillow
+numpy
+tqdm
+opencv-python
