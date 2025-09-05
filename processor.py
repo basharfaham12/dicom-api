@@ -1,33 +1,61 @@
-import os, zipfile
-import dicom2nifti
-import nibabel as nib
-from pyrobex.robex import robex
-from PIL import Image
+import cv2
 import numpy as np
+import random
+from PIL import Image, ImageEnhance
+import os
 
-def process_dicom_zip(zip_path, case_id):
-    extract_dir = f"temp/{case_id}/dicom"
-    nifti_dir = f"temp/{case_id}/nifti"
-    os.makedirs(extract_dir, exist_ok=True)
-    os.makedirs(nifti_dir, exist_ok=True)
+def center_crop_brain(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+        x, y, w, h = cv2.boundingRect(max(contours, key=cv2.contourArea))
+        return img[y:y+h, x:x+w]
+    return img
 
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_dir)
+def apply_clahe_and_soft_sharpen(img):
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    cl = clahe.apply(l)
+    merged = cv2.merge((cl, a, b))
+    enhanced = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
+    blurred = cv2.GaussianBlur(enhanced, (3, 3), sigmaX=1.0)
+    sharpened = cv2.addWeighted(enhanced, 1.2, blurred, -0.2, 0)
+    return sharpened
 
-    dicom2nifti.convert_directory(extract_dir, nifti_dir, compression=True)
-    nifti_file = [f for f in os.listdir(nifti_dir) if f.endswith('.nii.gz')][0]
-    nifti_path = os.path.join(nifti_dir, nifti_file)
+def augment_image(img):
+    ops = []
+    if random.random() < 0.5:
+        ops.append(img.transpose(Image.FLIP_LEFT_RIGHT))
+    if random.random() < 0.3:
+        ops.append(img.transpose(Image.FLIP_TOP_BOTTOM))
 
-    image = nib.load(nifti_path)
-    stripped, mask = robex(image)
-    img_data = stripped.get_fdata()
-    mask_data = mask.get_fdata()
+    enhancer_b = ImageEnhance.Brightness(img)
+    enhancer_c = ImageEnhance.Contrast(img)
+    img = enhancer_b.enhance(random.uniform(0.8, 1.2))
+    img = enhancer_c.enhance(random.uniform(0.8, 1.2))
 
-    scores = [np.sum(mask_data[:, :, i]) for i in range(mask_data.shape[2])]
-    best_idx = int(np.argmax(scores))
-    best_slice = img_data[:, :, best_idx]
-    norm_slice = (best_slice - best_slice.min()) / (best_slice.max() - best_slice.min()) * 255
+    angle = random.uniform(-15, 15)
+    img = img.rotate(angle)
 
-    output_path = f"outputs/{case_id}_brain.png"
-    Image.fromarray(norm_slice.astype(np.uint8)).save(output_path)
+    dx = random.randint(-10, 10)
+    dy = random.randint(-10, 10)
+    img = img.transform(img.size, Image.AFFINE, (1, 0, dx, 0, 1, dy))
+
+    img = img.resize((224, 224))
+    ops.append(img)
+    return random.choice(ops)
+
+def enhance_single_image(path, case_id):
+    img = cv2.imread(path)
+    centered = center_crop_brain(img)
+    enhanced = apply_clahe_and_soft_sharpen(centered)
+    resized = cv2.resize(enhanced, (224, 224))
+    pil_img = Image.fromarray(cv2.cvtColor(resized, cv2.COLOR_BGR2RGB))
+    final_img = augment_image(pil_img)
+
+    output_path = f"outputs/{case_id}_enhanced.png"
+    os.makedirs("outputs", exist_ok=True)
+    final_img.save(output_path)
     return output_path
