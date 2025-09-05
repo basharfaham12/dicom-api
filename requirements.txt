@@ -6,4 +6,3 @@ nibabel
 pyrobex
 Pillow
 numpy
-opencv-python
