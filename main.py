@@ -75,5 +75,7 @@ async def process_image(file: UploadFile = File(...)):
     output_path = f"processed/processed_{file.filename}"
     cv2.imwrite(output_path, resized)
 
-return FileResponse(output_path, media_type="image/jpeg", filename=f"processed_{file.filename}")
+    return FileResponse(output_path, media_type="image/jpeg", filename=f"processed_{file.filename}")
+
+
 
