@@ -1,11 +1,12 @@
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import numpy as np
 import joblib
 import os
 import cv2
+import requests
 from processor import center_crop_brain, apply_clahe_and_soft_sharpen
 
 app = FastAPI()
@@ -19,8 +20,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# تحميل النموذج بصيغة joblib
-model = joblib.load("assets/model/alz_model.joblib")
+# تحميل النموذج من Google Drive إذا لم يكن موجودًا
+model_path = "assets/model/alz_model.joblib"
+if not os.path.exists(model_path):
+    os.makedirs("assets/model", exist_ok=True)
+    url = "https://drive.google.com/uc?export=download&id=10n_6tmfTGCwzwJC_osCVQ7n-E48dwjm3"
+    response = requests.get(url)
+    with open(model_path, "wb") as f:
+        f.write(response.content)
+
+# تحميل النموذج
+model = joblib.load(model_path)
 
 # ترتيب الميزات
 clinical_features = [
@@ -46,7 +56,6 @@ scaler_std = np.array([
     0.40115988975583755, 1.2727142669861211, 0.46910359395059603, 0.49472914086772646,
     0.49058621123444807, 0.4293772721369649, 0.35163865046095627, 7.260397380482274
 ])
-
 
 # نموذج البيانات السريرية
 class ClinicalData(BaseModel):
