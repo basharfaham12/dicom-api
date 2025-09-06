@@ -9,3 +9,9 @@ nibabel
 pyrobex
 Pillow
 python-multipart
+scikit-learn
+matplotlib
+pandas
+aiofiles
+tqdm
+scipy
