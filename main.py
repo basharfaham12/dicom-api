@@ -9,11 +9,9 @@ import tensorflow as tf
 
 app = FastAPI()
 
-# تحميل نموذج TFLite
 interpreter = tf.lite.Interpreter(model_path="assets/model/alz_mlp_model.tflite")
 interpreter.allocate_tensors()
 
-# ترتيب الفيتشرات حسب ملف selected_features.txt
 clinical_features = [
     "MMSCORE", "MMREAD", "MMWRITE", "MMDRAW", "MMHAND", "MMREPEAT",
     "MMSTATE", "MMFOLD", "MMWATCH", "MMPENCIL", "MMAREA", "MMFLOOR",
@@ -21,7 +19,23 @@ clinical_features = [
     "MMDAY", "MMSEASON", "AGE"
 ]
 
-# نموذج البيانات السريرية لعرض الحقول في Swagger
+# القيم المستخرجة من التدريب
+scaler_mean = np.array([
+    25.40901177446436, 0.9828513508596645, 0.9513978207223314, 0.7634146292828864,
+    0.8962809832742954, 0.7550874422179567, 0.9839143914013538, 0.9792804031697696,
+    0.989613783443109, 0.9935395445253702, 0.8339536896541392, 0.7612431522300387,
+    0.7849456688579494, 4.356929402614527, 0.6504712853503307, 0.5250376173896225,
+    0.5643060422650875, 0.7437848556504271, 0.8459203132054011, 72.02141982430106
+])
+
+scaler_std = np.array([
+    4.879337034136477, 0.12630326688342508, 0.207899349710398, 0.41452493610365254,
+    0.29590400646325177, 0.4210381650406388, 0.12204164152232537, 0.1393163905325267,
+    0.10036738410651498, 0.07766957320428024, 0.36039393123505203, 0.41679135164540493,
+    0.40115988975583755, 1.2727142669861211, 0.46910359395059603, 0.49472914086772646,
+    0.49058621123444807, 0.4293772721369649, 0.35163865046095627, 7.260397380482274
+])
+
 class ClinicalData(BaseModel):
     MMSCORE: float
     MMREAD: float
@@ -46,20 +60,25 @@ class ClinicalData(BaseModel):
 
 @app.post("/predict-clinical/")
 async def predict_clinical(data: ClinicalData):
-    inputs = [getattr(data, key) for key in clinical_features]
-    input_data = np.array([inputs], dtype=np.float32)
+    inputs = np.array([getattr(data, key) for key in clinical_features])
+    x_scaled = (inputs - scaler_mean) / scaler_std
+    x_scaled = x_scaled.reshape(1, -1).astype(np.float32)
 
     input_index = interpreter.get_input_details()[0]['index']
     output_index = interpreter.get_output_details()[0]['index']
-
-    interpreter.set_tensor(input_index, input_data)
+    interpreter.set_tensor(input_index, x_scaled)
     interpreter.invoke()
-    output_data = interpreter.get_tensor(output_index)[0]
+    preds = interpreter.get_tensor(output_index)[0]
 
     labels = ["CN", "MCI", "AD"]
-    diagnosis = labels[np.argmax(output_data)]
+    predicted_class = labels[np.argmax(preds)]
+    confidence = float(np.max(preds))
 
-    return JSONResponse(content={"diagnosis": diagnosis})
+    return {
+        "diagnosis": predicted_class,
+        "confidence": round(confidence * 100, 2),
+        "probabilities": {labels[i]: round(float(preds[i]) * 100, 2) for i in range(len(labels))}
+    }
 
 @app.post("/process-image/")
 async def process_image(file: UploadFile = File(...)):
@@ -76,6 +95,3 @@ async def process_image(file: UploadFile = File(...)):
     cv2.imwrite(output_path, resized)
 
     return FileResponse(output_path, media_type="image/jpeg", filename=f"processed_{file.filename}")
-
-
-
