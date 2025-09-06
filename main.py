@@ -4,13 +4,14 @@ import cv2
 import numpy as np
 import os
 from image_processing import center_crop_brain, apply_clahe_and_soft_sharpen
-import tflite_runtime.interpreter as tflite
-
 app = FastAPI()
 
 # تحميل نموذج TFLite
-interpreter = tflite.Interpreter(model_path="assets/model/alz_mlp_model.tflite")
+import tensorflow as tf
+
+interpreter = tf.lite.Interpreter(model_path="assets/model/alz_mlp_model.tflite")
 interpreter.allocate_tensors()
+
 
 # ترتيب الفيتشرات حسب ملف selected_features.txt
 clinical_features = [
