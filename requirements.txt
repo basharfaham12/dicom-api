@@ -1,9 +1,11 @@
 fastapi
 uvicorn
-scikit-learn
 joblib
 numpy
 opencv-python
-python-multipart
-Pillow
 requests
+dicom2nifti
+nibabel
+pyrobex
+Pillow
+python-multipart
