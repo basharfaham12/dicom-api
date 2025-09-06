@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import numpy as np
@@ -7,6 +7,12 @@ import joblib
 import os
 import cv2
 import requests
+import dicom2nifti
+import nibabel as nib
+from pyrobex.robex import robex
+import zipfile
+import uuid
+from PIL import Image
 from processor import center_crop_brain, apply_clahe_and_soft_sharpen
 
 app = FastAPI()
@@ -19,6 +25,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# إنشاء مجلدات الحفظ عند تشغيل السيرفر
+os.makedirs("processed", exist_ok=True)
+os.makedirs("saved_outputs", exist_ok=True)
+os.makedirs("saved_masks", exist_ok=True)
+os.makedirs("temp_cases", exist_ok=True)
 
 # تحميل النموذج من Google Drive إذا لم يكن موجودًا
 model_path = "assets/model/alz_model.joblib"
@@ -107,17 +119,10 @@ async def process_image(file: UploadFile = File(...)):
     enhanced = apply_clahe_and_soft_sharpen(centered)
     resized = cv2.resize(enhanced, (224, 224))
 
-    os.makedirs("processed", exist_ok=True)
     output_path = f"processed/processed_{file.filename}"
     cv2.imwrite(output_path, resized)
 
     return FileResponse(output_path, media_type="image/jpeg", filename=f"processed_{file.filename}")
-from fastapi.responses import JSONResponse
-import dicom2nifti
-import nibabel as nib
-from pyrobex.robex import robex
-import zipfile
-import uuid
 
 @app.post("/process-case/")
 async def process_case(zip_file: UploadFile = File(...)):
@@ -163,11 +168,8 @@ async def process_case(zip_file: UploadFile = File(...)):
         mask_slice = (mask_data[:, :, best_idx] > 0).astype(np.uint8) * 255
 
         # حفظ الصورة والقناع
-        output_dir = "saved_outputs"
-        os.makedirs(output_dir, exist_ok=True)
-        image_path = os.path.join(output_dir, f"{case_id}_brain.png")
+        image_path = os.path.join("saved_outputs", f"{case_id}_brain.png")
         mask_path = os.path.join("saved_masks", f"{case_id}_mask.png")
-        os.makedirs("saved_masks", exist_ok=True)
 
         Image.fromarray(brain_slice).save(image_path)
         Image.fromarray(mask_slice).save(mask_path)
@@ -175,9 +177,9 @@ async def process_case(zip_file: UploadFile = File(...)):
         return JSONResponse(content={
             "case_id": case_id,
             "image_path": image_path,
-            "mask_saved": True
+            "mask_path": mask_path,
+            "status": "success"
         })
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
-
