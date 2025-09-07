@@ -1,46 +1,50 @@
-# processor.py
 import os
 import dicom2nifti
 import nibabel as nib
 from pyrobex.robex import robex
-from PIL import Image
 import numpy as np
+from PIL import Image
+import zipfile
+import shutil
 
-def process_dicom_folder(base_dir, output_dir):
-    output_img_dir = os.path.join(output_dir, "raw_images")
-    os.makedirs(output_img_dir, exist_ok=True)
-    saved_paths = []
+def process_dicom_zip(zip_path, output_dir):
+    temp_dir = os.path.join(output_dir, "temp")
+    nifti_dir = os.path.join(output_dir, "nifti")
+    os.makedirs(temp_dir, exist_ok=True)
+    os.makedirs(nifti_dir, exist_ok=True)
 
-    def save_slice(img_slice, mask_slice, orig_slice, case_id, slice_idx):
-        img_norm = (img_slice - img_slice.min()) / (img_slice.max() - img_slice.min()) * 255
-        img_path = os.path.join(output_img_dir, f"{case_id}_slice_{slice_idx:03d}.png")
-        Image.fromarray(img_norm.astype(np.uint8)).save(img_path)
-        saved_paths.append(img_path)
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(temp_dir)
 
-    case_folders = sorted(os.listdir(base_dir))
-    for case_id in case_folders:
-        dicom_path = os.path.join(base_dir, case_id)
-        nifti_out = os.path.join(output_dir, "nifti_temp", case_id)
-        os.makedirs(nifti_out, exist_ok=True)
+    dicom2nifti.convert_directory(temp_dir, nifti_dir, compression=True)
+    nifti_file = next((f for f in os.listdir(nifti_dir) if f.endswith('.nii.gz')), None)
+    if not nifti_file:
+        raise Exception("لم يتم العثور على ملف NIfTI")
 
-        try:
-            dicom2nifti.convert_directory(dicom_path, nifti_out, compression=True)
-            nifti_file = [f for f in os.listdir(nifti_out) if f.endswith('.nii.gz')][0]
-            nifti_path = os.path.join(nifti_out, nifti_file)
+    nifti_path = os.path.join(nifti_dir, nifti_file)
+    image = nib.load(nifti_path)
+    original_img = image.get_fdata()
 
-            original_img = nib.load(nifti_path).get_fdata()
-            image = nib.load(nifti_path)
-            stripped, mask = robex(image)
-            img_data = stripped.get_fdata()
-            mask_data = mask.get_fdata()
+    stripped, mask = robex(image)
+    img_data = stripped.get_fdata()
+    mask_data = mask.get_fdata()
 
-            scores = [np.sum(mask_data[:, :, i]) for i in range(mask_data.shape[2])]
-            top_indices = np.argsort(scores)[-3:]
+    scores = [np.sum(mask_data[:, :, i]) for i in range(mask_data.shape[2])]
+    best_idx = int(np.argmax(scores))
 
-            for idx in sorted(top_indices):
-                save_slice(img_data[:, :, idx], mask_data[:, :, idx], original_img[:, :, idx], case_id, idx)
+    def normalize(slice):
+        return ((slice - slice.min()) / (slice.max() - slice.min()) * 255).astype(np.uint8)
 
-        except Exception as e:
-            print(f"❌ فشل في معالجة الحالة: {case_id} - {e}")
+    brain_slice = normalize(img_data[:, :, best_idx])
+    mask_slice = (mask_data[:, :, best_idx] > 0).astype(np.uint8) * 255
 
-    return saved_paths
+    brain_path = os.path.join(output_dir, "brain.png")
+    mask_path = os.path.join(output_dir, "mask.png")
+
+    Image.fromarray(brain_slice).save(brain_path)
+    Image.fromarray(mask_slice).save(mask_path)
+
+    shutil.rmtree(temp_dir)
+    shutil.rmtree(nifti_dir)
+
+    return brain_path, mask_path
