@@ -7,12 +7,10 @@ import joblib
 import os
 import cv2
 import requests
-import dicom2nifti
-import nibabel as nib
-from pyrobex.robex import robex
-import zipfile
-import uuid
+import torch
+from torchvision import transforms
 from PIL import Image
+import io
 from processor import center_crop_brain, apply_clahe_and_soft_sharpen
 
 app = FastAPI()
@@ -32,7 +30,7 @@ os.makedirs("saved_outputs", exist_ok=True)
 os.makedirs("saved_masks", exist_ok=True)
 os.makedirs("temp_cases", exist_ok=True)
 
-# تحميل النموذج من Google Drive إذا لم يكن موجودًا
+# تحميل النموذج السريري من Google Drive إذا لم يكن موجودًا
 model_path = "assets/model/alz_model.joblib"
 if not os.path.exists(model_path):
     os.makedirs("assets/model", exist_ok=True)
@@ -41,10 +39,33 @@ if not os.path.exists(model_path):
     with open(model_path, "wb") as f:
         f.write(response.content)
 
-# تحميل النموذج
+# تحميل النموذج السريري
 model = joblib.load(model_path)
 
-# ترتيب الميزات
+# تحميل النموذج الهجين من Google Drive إذا لم يكن موجودًا
+hybrid_model_path = "assets/model/alzheimers_hybrid_model.pt"
+if not os.path.exists(hybrid_model_path):
+    url = "https://drive.google.com/uc?export=download&id=1_0BKg57f-pQKjZHLMx6A6tUN1y_xHZKD"
+    response = requests.get(url)
+    os.makedirs("assets/model", exist_ok=True)
+    with open(hybrid_model_path, "wb") as f:
+        f.write(response.content)
+
+# إعداد النموذج الهجين
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+hybrid_model = torch.load(hybrid_model_path, map_location=device)
+hybrid_model.eval()
+
+# التحويلات للصورة
+image_transform = transforms.Compose([
+    transforms.Resize((128, 128)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.5]*3, [0.5]*3)
+])
+
+class_names_hybrid = ["AD", "CN", "MCI"]
+
+# ترتيب الميزات السريرية
 clinical_features = [
     "MMSCORE", "MMREAD", "MMWRITE", "MMDRAW", "MMHAND", "MMREPEAT",
     "MMSTATE", "MMFOLD", "MMWATCH", "MMPENCIL", "MMAREA", "MMFLOOR",
@@ -124,63 +145,22 @@ async def process_image(file: UploadFile = File(...)):
 
     return FileResponse(output_path, media_type="image/jpeg", filename=f"processed_{file.filename}")
 
-@app.post("/process-case/")
-async def process_case(zip_file: UploadFile = File(...)):
+@app.post("/predict-image/")
+async def predict_image(file: UploadFile = File(...)):
     try:
-        # إنشاء مجلد مؤقت للحالة
-        case_id = str(uuid.uuid4())
-        temp_dir = f"temp_cases/{case_id}"
-        os.makedirs(temp_dir, exist_ok=True)
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+        image_tensor = image_transform(image).unsqueeze(0).to(device)
 
-        # فك ضغط ملفات DICOM
-        zip_path = os.path.join(temp_dir, "case.zip")
-        with open(zip_path, "wb") as f:
-            f.write(await zip_file.read())
+        with torch.no_grad():
+            output = hybrid_model(image_tensor)
+            _, predicted = torch.max(output, 1)
 
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(temp_dir)
-
-        # تحويل DICOM إلى NIfTI
-        nifti_out = os.path.join(temp_dir, "nifti")
-        os.makedirs(nifti_out, exist_ok=True)
-        dicom2nifti.convert_directory(temp_dir, nifti_out, compression=True)
-        nifti_file = [f for f in os.listdir(nifti_out) if f.endswith('.nii.gz')][0]
-        nifti_path = os.path.join(nifti_out, nifti_file)
-
-        # تحميل الصورة الأصلية
-        original_img = nib.load(nifti_path).get_fdata()
-
-        # تطبيق ROBEX
-        image = nib.load(nifti_path)
-        stripped, mask = robex(image)
-        img_data = stripped.get_fdata()
-        mask_data = mask.get_fdata()
-
-        # اختيار أفضل شريحة واحدة
-        scores = [np.sum(mask_data[:, :, i]) for i in range(mask_data.shape[2])]
-        best_idx = int(np.argmax(scores))
-
-        # تجهيز الصورة والقناع
-        def normalize(slice):
-            return ((slice - slice.min()) / (slice.max() - slice.min()) * 255).astype(np.uint8)
-
-        brain_slice = normalize(img_data[:, :, best_idx])
-        mask_slice = (mask_data[:, :, best_idx] > 0).astype(np.uint8) * 255
-
-        # حفظ الصورة والقناع
-        image_path = os.path.join("saved_outputs", f"{case_id}_brain.png")
-        mask_path = os.path.join("saved_masks", f"{case_id}_mask.png")
-
-        Image.fromarray(brain_slice).save(image_path)
-        Image.fromarray(mask_slice).save(mask_path)
-
+        predicted_label = class_names_hybrid[predicted.item()]
         return JSONResponse(content={
-            "case_id": case_id,
-            "image_path": image_path,
-            "mask_path": mask_path,
+            "diagnosis": predicted_label,
             "status": "success"
         })
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
-
