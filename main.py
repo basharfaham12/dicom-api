@@ -53,7 +53,7 @@ if not os.path.exists(hybrid_model_path):
 
 # إعداد النموذج الهجين
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-hybrid_model = torch.load(hybrid_model_path, map_location=device)
+hybrid_model = torch.load(hybrid_model_path, map_location=device, weights_only=False)
 hybrid_model.eval()
 
 # التحويلات للصورة
@@ -164,3 +164,4 @@ async def predict_image(file: UploadFile = File(...)):
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
